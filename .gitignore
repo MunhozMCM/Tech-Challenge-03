@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Data (downloaded by src.data.io.download_medical_abstracts) and model artifacts
+/data/*
+!/data/.gitignore
+/models/*
+!/models/.gitignore
+
+# MLflow tracking
+mlflow.db
+mlruns/
+mlartifacts/
+
+# Notebooks
+.ipynb_checkpoints/
+
+# IDEs
+.vscode/
+.idea/
+
+# Tooling
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+
+# WSL/Windows alternate-data-stream cruft
+*:Zone.Identifier
+
+# Personal folders
+/material-fiap
