@@ -5,9 +5,13 @@ description = "Tech Challenge Fase 3 — classificador de texto médico (NLP) co
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
+    "fastapi>=0.142.2",
+    "httpx>=0.28.1",
     "mlflow>=3.15.1",
     "pandas>=2.3.3",
+    "pydantic>=2.13.5",
     "scikit-learn>=1.9.0",
+    "uvicorn[standard]>=0.54.0",
 ]
 
 [dependency-groups]

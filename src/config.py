@@ -33,3 +33,14 @@ MLFLOW_TRACKING_URI: Final[str] = os.getenv(
     "MLFLOW_TRACKING_URI", f"sqlite:///{PROJECT_ROOT / 'mlflow.db'}"
 )
 EXPERIMENT_NAME: Final[str] = "medical-abstracts-nlp"
+
+# Mapeamento clínico de urgência para triagem hospitalar
+URGENCY_MAPPING: Final[dict[int, str]] = {
+    1: "atencao",  # neoplasms (investigação oncológica prioritária)
+    2: "normal",   # digestive system diseases (acompanhamento ambulatorial padrão)
+    3: "urgente",  # nervous system diseases (risco neurológico agudo)
+    4: "urgente",  # cardiovascular diseases (risco hemodinâmico/isquêmico agudo)
+    5: "atencao",  # general pathological conditions (avaliação clínica geral)
+}
+
+BASELINE_MODEL_PATH: Final[Path] = MODELS_DIR / "linear_svm_baseline.joblib"
