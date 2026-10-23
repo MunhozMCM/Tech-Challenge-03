@@ -1,0 +1,7 @@
+global:
+  scrape_interval: 5s # Coleta métricas a cada 5 segundos
+
+scrape_configs:
+  - job_name: "medical_triage_api"
+    static_configs:
+      - targets: ["api:8000"]

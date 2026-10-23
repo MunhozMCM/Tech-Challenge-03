@@ -1,0 +1,34 @@
+{
+  "title": "API de Triagem Médica",
+  "refresh": "5s",
+  "panels": [
+    {
+      "title": "Total de Requisições",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 0 },
+      "targets": [
+        { "expr": "sum(api_requests_total)", "legendFormat": "Total" }
+      ]
+    },
+    {
+      "title": "Latência P95 (ms)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 0 },
+      "targets": [
+        { "expr": "histogram_quantile(0.95, sum(rate(api_request_latency_seconds_bucket[1m])) by (le)) * 1000", "legendFormat": "P95 Latency (ms)" }
+      ]
+    },
+    {
+      "title": "Taxa de Erros HTTP 5xx (%)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 0 },
+      "targets": [
+        { "expr": "sum(rate(api_requests_total{http_status=~\"5..\"}[1m])) / sum(rate(api_requests_total[1m])) * 100", "legendFormat": "Error Rate %" }
+      ]
+    }
+  ],
+  "schemaVersion": 38
+}

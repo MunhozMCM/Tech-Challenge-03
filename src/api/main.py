@@ -6,22 +6,32 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 import joblib
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import Response
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 
 from src.api.schemas import TriageRequest, TriageResponse
 from src.config import BASELINE_MODEL_PATH, CLASS_NAMES, URGENCY_MAPPING
 
-model_registry: dict[str, Any] = {}
+# --- MÉTRICAS PROMETHEUS ---
+REQUEST_COUNT = Counter(
+    "api_requests_total", 
+    "Total de requisicoes", 
+    ["method", "endpoint", "http_status"]
+)
+REQUEST_LATENCY = Histogram(
+    "api_request_latency_seconds", 
+    "Tempo de resposta da API em segundos", 
+    ["method", "endpoint"]
+)
 
+model_registry: dict[str, Any] = {}
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Load the classification pipeline into memory on startup."""
     if not BASELINE_MODEL_PATH.exists():
-        msg = (
-            f"Modelo não encontrado em {BASELINE_MODEL_PATH}. "
-            "Execute `uv run python -m src.models.train` antes de iniciar a API."
-        )
+        msg = f"Modelo não encontrado em {BASELINE_MODEL_PATH}."
         raise RuntimeError(msg)
     model_registry["pipeline"] = joblib.load(BASELINE_MODEL_PATH)
     yield
@@ -35,16 +45,35 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# --- MIDDLEWARE DE OBSERVABILIDADE ---
+@app.middleware("http")
+async def metrics_middleware(request: Request, call_next):
+    start_time = time.perf_counter()
+    method = request.method
+    endpoint = request.url.path
+    status_code = 500
+
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        return response
+    finally:
+        latency = time.perf_counter() - start_time
+        REQUEST_COUNT.labels(method=method, endpoint=endpoint, http_status=str(status_code)).inc()
+        REQUEST_LATENCY.labels(method=method, endpoint=endpoint).observe(latency)
+
+# --- ROTAS ---
+@app.get("/metrics")
+def get_metrics():
+    """Endpoint consumido pelo Prometheus para coleta das métricas."""
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 @app.get("/health")
 def health_check() -> dict[str, Any]:
-    """Verify service health and model availability."""
     return {"status": "ok", "model_loaded": "pipeline" in model_registry}
-
 
 @app.post("/predict", response_model=TriageResponse)
 def predict(payload: TriageRequest) -> TriageResponse:
-    """Classify a medical abstract and return condition and urgency level."""
     pipeline = model_registry.get("pipeline")
     if pipeline is None:
         raise HTTPException(status_code=503, detail="Modelo não carregado.")
