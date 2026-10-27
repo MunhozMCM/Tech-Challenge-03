@@ -9,7 +9,7 @@ import httpx
 from src.config import TEXT_COLUMN
 from src.data.io import load_clean_splits
 
-API_URL = os.getenv("API_URL", "http://localhost:8000/predict")
+API_URL = os.getenv("API_URL", "http://127.0.0.1:8000/predict/onnx")
 
 
 def run_benchmark(n_samples: int = 300) -> None:

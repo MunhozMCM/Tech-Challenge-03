@@ -1,11 +1,11 @@
-"""Training pipeline for the baseline NLP classifier (TF-IDF + LinearSVC)."""
+"""Training pipeline for the baseline NLP classifier (TF-IDF + LogisticRegression)."""
 
 import joblib
 import mlflow
+from sklearn.linear_model import LogisticRegression
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 from sklearn.pipeline import Pipeline
-from sklearn.svm import LinearSVC
 
 from src.config import (
     BASELINE_MODEL_PATH,
@@ -20,7 +20,7 @@ from src.data.io import load_clean_splits
 
 
 def build_pipeline() -> Pipeline:
-    """Create the TF-IDF + LinearSVC pipeline defined in Decisions 3 and 4."""
+    """Create the TF-IDF + LogisticRegression pipeline."""
     return Pipeline(
         [
             (
@@ -33,7 +33,8 @@ def build_pipeline() -> Pipeline:
                     sublinear_tf=True,
                 ),
             ),
-            ("clf", LinearSVC(random_state=SEED)),
+            # CORREÇÃO: Usando LogisticRegression agora!
+            ("clf", LogisticRegression(random_state=SEED, max_iter=1000)),
         ]
     )
 
@@ -49,7 +50,7 @@ def train_and_evaluate() -> Pipeline:
     mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
     mlflow.set_experiment(EXPERIMENT_NAME)
 
-    with mlflow.start_run(run_name="linear_svm_baseline"):
+    with mlflow.start_run(run_name="logreg_baseline"):
         pipeline = build_pipeline()
         pipeline.fit(x_train, y_train)
 
@@ -68,7 +69,7 @@ def train_and_evaluate() -> Pipeline:
                 "ngram_range": "(1, 2)",
                 "min_df": 2,
                 "sublinear_tf": True,
-                "classifier": "LinearSVC",
+                "classifier": "LogisticRegression",
                 "seed": SEED,
                 "train_samples": len(train_df),
                 "test_samples": len(test_df),
