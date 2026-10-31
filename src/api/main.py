@@ -13,32 +13,27 @@ from fastapi.responses import Response
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 
 from src.api.schemas import TriageRequest, TriageResponse
-from src.config import BASELINE_MODEL_PATH, CLASS_NAMES, URGENCY_MAPPING
-
-ONNX_MODEL_PATH = "models/model_optimized.onnx"
+from src.config import BASELINE_MODEL_PATH, CLASS_NAMES, ONNX_MODEL_PATH, URGENCY_MAPPING
 
 REQUEST_COUNT = Counter(
-    "api_requests_total", 
-    "Total de requisicoes", 
-    ["method", "endpoint", "http_status"]
+    "api_requests_total", "Total de requisicoes", ["method", "endpoint", "http_status"]
 )
 REQUEST_LATENCY = Histogram(
-    "api_request_latency_seconds", 
-    "Tempo de resposta da API em segundos", 
-    ["method", "endpoint"]
+    "api_request_latency_seconds", "Tempo de resposta da API em segundos", ["method", "endpoint"]
 )
 
 model_registry: dict[str, Any] = {}
+
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Load both standard and ONNX classification pipelines into memory on startup."""
     if BASELINE_MODEL_PATH.exists():
         model_registry["pipeline"] = joblib.load(BASELINE_MODEL_PATH)
-    
+
     # Carregando o modelo otimizado com ONNX Runtime
     model_registry["onnx_session"] = ort.InferenceSession(ONNX_MODEL_PATH)
-    
+
     yield
     model_registry.clear()
 
@@ -49,6 +44,7 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
 
 @app.middleware("http")
 async def metrics_middleware(request: Request, call_next):
@@ -66,24 +62,27 @@ async def metrics_middleware(request: Request, call_next):
         REQUEST_COUNT.labels(method=method, endpoint=endpoint, http_status=str(status_code)).inc()
         REQUEST_LATENCY.labels(method=method, endpoint=endpoint).observe(latency)
 
+
 @app.get("/metrics")
 def get_metrics():
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
+
 @app.get("/health")
 def health_check() -> dict[str, Any]:
     return {
-        "status": "ok", 
+        "status": "ok",
         "sklearn_loaded": "pipeline" in model_registry,
-        "onnx_loaded": "onnx_session" in model_registry
+        "onnx_loaded": "onnx_session" in model_registry,
     }
+
 
 # Rota Baseline (Scikit-Learn)
 @app.post("/predict", response_model=TriageResponse)
 def predict(payload: TriageRequest) -> TriageResponse:
     pipeline = model_registry.get("pipeline")
     start = time.perf_counter()
-    
+
     pred_label = int(pipeline.predict([payload.medical_abstract])[0])
     latency_ms = (time.perf_counter() - start) * 1000.0
 
@@ -95,22 +94,23 @@ def predict(payload: TriageRequest) -> TriageResponse:
         model_backend="sklearn-logistic-regression",
     )
 
+
 # Nova Rota Otimizada (ONNX)
 @app.post("/predict/onnx", response_model=TriageResponse)
 def predict_onnx(payload: TriageRequest) -> TriageResponse:
     session = model_registry.get("onnx_session")
     if not session:
         raise HTTPException(status_code=503, detail="ONNX Runtime não carregado.")
-        
+
     start = time.perf_counter()
-    
+
     # ONNX exige o input como um array 2D de strings do tipo object
     inputs = {"medical_abstract": np.array([[payload.medical_abstract]], dtype=object)}
-    
+
     # Executa a inferência em C++
     ort_outs = session.run(None, inputs)
     pred_label = int(ort_outs[0][0])
-    
+
     latency_ms = (time.perf_counter() - start) * 1000.0
 
     return TriageResponse(

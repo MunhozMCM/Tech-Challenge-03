@@ -29,6 +29,13 @@ def read_dataset(path: str | Path) -> pd.DataFrame:
     return pd.read_csv(path)
 
 
+def save_dataset(dataset: pd.DataFrame, path: str | Path) -> None:
+    """Write a DataFrame to CSV (without the index), creating parent dirs if needed."""
+    destination = Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    dataset.to_csv(destination, index=False)
+
+
 def load_clean_splits() -> tuple[pd.DataFrame, pd.DataFrame]:
     """Load train and test splits keeping only single-label abstracts (Decision 1)."""
     download_medical_abstracts()

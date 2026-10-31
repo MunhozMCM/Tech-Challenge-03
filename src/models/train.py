@@ -1,9 +1,12 @@
 """Training pipeline for the baseline NLP classifier (TF-IDF + LogisticRegression)."""
 
+from pathlib import Path
+
 import joblib
 import mlflow
-from sklearn.linear_model import LogisticRegression
+import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 from sklearn.pipeline import Pipeline
 
@@ -11,7 +14,6 @@ from src.config import (
     BASELINE_MODEL_PATH,
     EXPERIMENT_NAME,
     MLFLOW_TRACKING_URI,
-    MODELS_DIR,
     SEED,
     TARGET,
     TEXT_COLUMN,
@@ -39,10 +41,20 @@ def build_pipeline() -> Pipeline:
     )
 
 
-def train_and_evaluate() -> Pipeline:
-    """Train the baseline model, log metrics to MLflow, and persist the artifact."""
-    MODELS_DIR.mkdir(parents=True, exist_ok=True)
-    train_df, test_df = load_clean_splits()
+def train_and_evaluate(
+    train_df: pd.DataFrame | None = None,
+    test_df: pd.DataFrame | None = None,
+    model_path: Path = BASELINE_MODEL_PATH,
+    run_name: str = "logreg_baseline",
+) -> dict[str, float]:
+    """Train the baseline model, log metrics to MLflow, persist the artifact and return the metrics.
+
+    Without splits it loads the clean single-label corpus itself (CLI usage); the Airflow DAG
+    passes the CSVs written by its ingest task and a candidate ``model_path``.
+    """
+    if train_df is None or test_df is None:
+        train_df, test_df = load_clean_splits()
+    model_path.parent.mkdir(parents=True, exist_ok=True)
 
     x_train, y_train = train_df[TEXT_COLUMN], train_df[TARGET]
     x_test, y_test = test_df[TEXT_COLUMN], test_df[TARGET]
@@ -50,7 +62,7 @@ def train_and_evaluate() -> Pipeline:
     mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
     mlflow.set_experiment(EXPERIMENT_NAME)
 
-    with mlflow.start_run(run_name="logreg_baseline"):
+    with mlflow.start_run(run_name=run_name):
         pipeline = build_pipeline()
         pipeline.fit(x_train, y_train)
 
@@ -77,11 +89,11 @@ def train_and_evaluate() -> Pipeline:
         )
         mlflow.log_metrics(metrics)
 
-        joblib.dump(pipeline, BASELINE_MODEL_PATH)
-        print(f"Modelo salvo em: {BASELINE_MODEL_PATH}")
+        joblib.dump(pipeline, model_path)
+        print(f"Modelo salvo em: {model_path}")
         print(f"Métricas no teste: {metrics}")
 
-    return pipeline
+    return metrics
 
 
 if __name__ == "__main__":
