@@ -11,13 +11,14 @@ Para a triagem clínica, adotamos a **Inferência Real-Time (Online)** via API R
 * **Serviço de Inferência:** AWS ECS com AWS Fargate para escalabilidade serverless.
 * **Armazenamento de Artefactos:** Amazon S3 para versionamento do modelo (`.joblib`) e dados históricos.
 * **Orquestração e Monitorização:** Amazon MWAA (Airflow) para retreino periódico e Prometheus/Grafana para observabilidade.
+* **Baseline de latência local** (API no Docker, rota `/predict` com scikit-learn): `3,2 ms` de tempo de resposta (p50) e `3,6 ms` (p95), dos quais `1,5 ms` são o modelo. Medição e comparação com o ONNX na [Etapa 4](#-etapa-4-otimização-de-latência-onnx).
 
 ### 2. Decisões de Modelagem (NLP)
 * **Dataset:** Medical Abstracts TC Corpus.
 * **Filtro Single-Label:** Remoção de abstracts multi-rótulo conflitantes para evitar ruído e vazamento de dados entre treino e teste (6.600+ amostras limpas).
-* **Modelo em Produção:** Pipeline com **TF-IDF Vectorizer (unigramas + bigramas) + Regressão Logística**. O TF-IDF é a etapa de NLP (tokenização, stop words, n-gramas e ponderação dos termos); a regressão logística classifica o vetor resultante.
-* **Métricas de Qualidade no Teste:** Acurácia: `76.88%` | Macro-F1: `0.7443`.
-* **Por que não o Linear SVM do notebook** (Macro-F1 `0.8149`): o conversor do skl2onnx 1.20 falha com `LinearSVC` dentro de um Pipeline, e a Etapa 4 depende da exportação para ONNX. A análise completa está em [`notebooks/NLP_experiments_decisions.md`](notebooks/NLP_experiments_decisions.md).
+* **Modelo em Produção:** Pipeline com **TF-IDF Vectorizer (unigramas + bigramas) + Linear SVM calibrado** (`CalibratedClassifierCV`, sigmoide). O TF-IDF é a etapa de NLP (tokenização, stop words, n-gramas e ponderação dos termos); o SVM classifica o vetor resultante.
+* **Métricas de Qualidade no Teste:** Acurácia: `82.91%` | Macro-F1: `0.8279` (validação cruzada no treino: `0.805`).
+* **Por que calibrado:** o Linear SVM foi o melhor classificador no notebook, mas o skl2onnx 1.20 não converte um `LinearSVC` puro dentro de um Pipeline, e a Etapa 4 depende do ONNX. Envolvido na calibração, ele converte, ganha probabilidades por classe e mantém o mesmo tamanho (5,6 MB). A versão intermediária com Regressão Logística ficava em Macro-F1 `0.7443`. A análise completa está em [`notebooks/NLP_experiments_decisions.md`](notebooks/NLP_experiments_decisions.md).
 
 ---
 
@@ -44,8 +45,8 @@ ingest_data → train_model → quality_gate → export_onnx → promote_model
 | Task | O que faz |
 |---|---|
 | `ingest_data` | Baixa o corpus, aplica o filtro single-label e grava `data/processed/train.csv` e `test.csv` |
-| `train_model` | Lê os CSVs, treina TF-IDF + LogisticRegression, registra o run `airflow_retrain` no MLflow e salva o candidato em `models/candidate/` |
-| `quality_gate` | Reprova a execução (sem retry) se o Macro-F1 no teste for menor que `0.70` |
+| `train_model` | Lê os CSVs, treina TF-IDF + Linear SVM calibrado, registra o run `airflow_retrain` no MLflow e salva o candidato em `models/candidate/` |
+| `quality_gate` | Reprova a execução (sem retry) se o Macro-F1 no teste for menor que `0.78` (o modelo atual faz `0.828`; a versão antiga com Regressão Logística, `0.744`, seria barrada) |
 | `export_onnx` | Converte o candidato para ONNX e exige ≥ 97% de concordância com o scikit-learn no conjunto de teste |
 | `promote_model` | Move os artefatos aprovados para `models/linear_svm_baseline.joblib` e `models/model_optimized.onnx`, que a API carrega |
 
@@ -69,24 +70,32 @@ A API foi instrumentada com o `prometheus_client` expondo a rota `/metrics`. A i
 * **Automação:** O Grafana é provisionado automaticamente ao subir os containers, com o Datasource do Prometheus e o Dashboard já mapeados via volumes.
 * **Métricas Obrigatórias:** O dashboard [`API de Triagem Médica`](http://localhost:3000/d/triage-api) conta com os três painéis exigidos, todos restritos às rotas de triagem (sem os scrapes do Prometheus em `/metrics` nem o `/health`):
   1. Total de Requisições de Triagem.
-  2. Latência P95 por Rota (ms) — uma linha para `/predict` (scikit-learn) e outra para `/predict/onnx` (ONNX Runtime).
-  3. Taxa de Erros HTTP 5xx (%) — exibe 0% quando não há erros.
+  2. Latência P95 por Rota (ms) — uma linha para `/predict` (scikit-learn) e outra para `/predict/onnx` (ONNX Runtime). O histograma usa buckets de 0,5 ms até 5 ms, pois as respostas levam de 1 a 4 ms (com os buckets padrão, que começam em 5 ms, o P95 não distinguiria as rotas).
+  3. Taxa de Erros HTTP (%) — erros 5xx (falha do servidor) e 4xx (payload inválido); exibe 0% quando não há erros.
+* **Tráfego para o dashboard:** `uv run python -m src.api.traffic` envia ~10 req/s por 5 minutos, alternando as duas rotas com abstracts reais de teste e ~5% de payloads inválidos (HTTP 422), o que alimenta os três painéis. O P95 só aparece enquanto chegam requisições, porque é calculado sobre janelas de 1 minuto.
 
 ---
 
 ## ⚡ Etapa 4: Otimização de Latência (ONNX)
 
-* **Técnica:** o pipeline TF-IDF + Regressão Logística é exportado para **ONNX** ([`src/models/convert_to_onnx.py`](src/models/convert_to_onnx.py)) e servido pelo **ONNX Runtime** na rota `/predict/onnx`, ao lado da rota original `/predict` (scikit-learn).
-* **Qualidade preservada:** o modelo ONNX concorda com o scikit-learn em 98,5% dos abstracts de teste. As divergências são quase-empates entre duas classes (TF-IDF em float32), e o Macro-F1 do ONNX é `0.752`, contra `0.744` do original. A DAG reprova a publicação se a concordância cair abaixo de 97%.
+* **Técnica:** o pipeline TF-IDF + Linear SVM calibrado é exportado para **ONNX** ([`src/models/convert_to_onnx.py`](src/models/convert_to_onnx.py)) e servido pelo **ONNX Runtime** na rota `/predict/onnx`, ao lado da rota original `/predict` (scikit-learn).
+* **Qualidade preservada:** o modelo ONNX concorda com o scikit-learn em 98,3% dos abstracts de teste. As divergências são quase-empates entre duas classes (TF-IDF em float32), e o Macro-F1 do ONNX é `0.833`, contra `0.828` do original. A DAG reprova a publicação se a concordância cair abaixo de 97%.
+* **Sessão com uma thread:** a API cria a sessão do ONNX Runtime com `intra_op_num_threads=1`. Com o pool padrão (uma thread por núcleo), as threads ficam em espera ativa após cada inferência e disputam CPU com o servidor. Com requisições espaçadas em 100 ms, o p95 HTTP da rota ONNX era de 11,0 ms, contra 5,5 ms do scikit-learn; com uma thread, caiu para 3,9 ms.
 * **Latência** (`uv run python -m src.api.benchmark`: 1.000 abstracts de teste por rota, com as rotas intercaladas para que a variação da máquina afete as duas igualmente; API no Docker local):
 
 | Rota | Modelo p50 | Modelo p95 | HTTP p50 | HTTP p95 |
 |---|---|---|---|---|
-| `/predict` (scikit-learn) | 1,15 ms | 1,53 ms | 3,20 ms | 6,84 ms |
-| `/predict/onnx` (ONNX Runtime) | **0,51 ms** | **0,73 ms** | **2,53 ms** | **5,52 ms** |
-| Ganho do ONNX | **−56%** | −52% | **−21%** | −19% |
+| `/predict` (scikit-learn) | 1,53 ms | 1,90 ms | 3,18 ms | 3,55 ms |
+| `/predict/onnx` (ONNX Runtime) | **0,54 ms** | **0,67 ms** | **2,14 ms** | **2,38 ms** |
+| Ganho do ONNX | **−65%** | **−65%** | **−33%** | **−33%** |
 
-O tempo de inferência do modelo cai pela metade. No tempo de resposta completo (HTTP) o ganho é menor porque a maior parte dos ~2,5 ms vem da rede e do FastAPI, não do modelo.
+O tempo de inferência do modelo cai a cerca de um terço. No tempo de resposta completo (HTTP) o ganho é menor porque cerca de 1,6 ms de cada requisição vem da rede e do FastAPI, e não do modelo.
+
+---
+
+## 🎬 Vídeo de Apresentação (STAR)
+
+🔗 _Link a ser adicionado._
 
 ---
 
@@ -121,7 +130,8 @@ docker compose up -d --build
 ### 4. Validar a API e gerar tráfego (Etapas 1, 3 e 4)
 ```bash
 uv run python scripts/smoke_test.py    # health, as duas rotas de predição, validação e /metrics
-uv run python -m src.api.benchmark     # latência scikit-learn × ONNX; alimenta o dashboard
+uv run python -m src.api.benchmark     # latência scikit-learn × ONNX (tabela da Etapa 4)
+uv run python -m src.api.traffic       # ~10 req/s por 5 min para ver o dashboard ao vivo
 ```
 Exemplo de requisição:
 ```bash
