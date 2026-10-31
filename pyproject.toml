@@ -19,6 +19,12 @@ dependencies = [
 ]
 
 [dependency-groups]
+airflow = [
+    "apache-airflow>=3.2.2",
+    # svcs 26 drops app.state.svcs_registry on lifespan exit, which breaks Airflow 3.2's
+    # in-process execution API (`airflow dags test` fails with KeyError: 'svcs_registry')
+    "svcs<26",
+]
 dev = [
     "ipykernel>=7.3.0",
     "matplotlib>=3.11.1",

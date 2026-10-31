@@ -19,6 +19,9 @@ venv.bak/
 /models/*
 !/models/.gitignore
 
+# Airflow local state (scripts/airflow.sh)
+.airflow/
+
 # MLflow tracking
 mlflow.db
 mlruns/
