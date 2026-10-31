@@ -31,8 +31,13 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     if BASELINE_MODEL_PATH.exists():
         model_registry["pipeline"] = joblib.load(BASELINE_MODEL_PATH)
 
-    # Carregando o modelo otimizado com ONNX Runtime
-    model_registry["onnx_session"] = ort.InferenceSession(ONNX_MODEL_PATH)
+    # Carregando o modelo otimizado com ONNX Runtime. Uma thread só: o modelo é pequeno, e o
+    # pool padrão (uma thread por núcleo) fica em espera ativa após cada inferência, disputando
+    # CPU com o servidor e inflando o tempo de resposta quando as requisições chegam espaçadas.
+    session_options = ort.SessionOptions()
+    session_options.intra_op_num_threads = 1
+    session_options.inter_op_num_threads = 1
+    model_registry["onnx_session"] = ort.InferenceSession(ONNX_MODEL_PATH, session_options)
 
     yield
     model_registry.clear()
