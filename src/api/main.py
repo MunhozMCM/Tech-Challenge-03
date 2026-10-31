@@ -91,7 +91,7 @@ def predict(payload: TriageRequest) -> TriageResponse:
         condition_name=CLASS_NAMES[pred_label],
         urgency=URGENCY_MAPPING[pred_label],
         latency_ms=round(latency_ms, 4),
-        model_backend="sklearn-logistic-regression",
+        model_backend="scikit-learn",
     )
 
 

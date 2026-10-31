@@ -17,7 +17,7 @@ def export_onnx(model_path: Path = BASELINE_MODEL_PATH, onnx_path: Path = ONNX_M
     pipeline = joblib.load(model_path)
     initial_type = [(TEXT_COLUMN, StringTensorType([None, 1]))]
 
-    # O LogisticRegression é 100% suportado nativamente pelo skl2onnx
+    # O LinearSVC puro falha no skl2onnx 1.20; calibrado (CalibratedClassifierCV) converte
     onx = to_onnx(
         pipeline,
         initial_types=initial_type,

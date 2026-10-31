@@ -78,3 +78,33 @@ Weakest spots of the Linear SVM: *nervous system diseases* (recall 0.71, with 21
 - `LinearSVC` has no `predict_proba`. If the API must return a confidence score, wrap it in `CalibratedClassifierCV` or tune `C` for Logistic Regression and compare again.
 - Hyperparameter search (`C`, `alpha`, vectorizer settings) under the same CV protocol.
 - Etapa 4: confirm the chosen pipeline converts with `skl2onnx` (TF-IDF with bigrams and `sublinear_tf`). Then measure ONNX Runtime against sklearn with this same single-request protocol. The sklearn baseline is already sub-millisecond, so the comparison should also report p95 and the latency measured through the API.
+
+---
+
+## Decision 5: Production model — calibrated Linear SVM (resolves the open points above)
+
+### What happened after the notebook
+
+1. `src/models/train.py` first shipped the Linear SVM. A bare `LinearSVC` inside a Pipeline does not convert with skl2onnx 1.20: its parser asks every classifier for the `zipmap` option, and the `LinearSVC` converter rejects it (`NameError: Option 'zipmap' not in [...] for class 'LinearSVC'`). The conversion fails both through `to_onnx` and through `convert_sklearn`.
+2. To unblock Etapa 4 (ONNX), the pipeline was switched to `LogisticRegression` on defaults (`C=1.0`), which converts but scores only 0.744 macro-F1.
+3. Re-evaluated with the same TF-IDF, splits and 5-fold CV. The ONNX columns come from the converted model on the test set; latency is single-request p50, in-process:
+
+| Classifier | CV F1 macro | Test F1 macro | ONNX F1 | ONNX agreement | sklearn p50 | ONNX p50 | joblib / ONNX size |
+|---|---|---|---|---|---|---|---|
+| LogisticRegression `C=1` | 0.725 | 0.744 | 0.752 | 98.5% | 0.69 ms | 0.47 ms | 5.6 / 4.8 MB |
+| LogisticRegression `C=30` | 0.791 | 0.803 | 0.807 | 98.4% | 0.62 ms | 0.46 ms | 5.6 / 4.8 MB |
+| Calibrated LinearSVC, `ensemble=True` | 0.803 | 0.823 | 0.829 | 98.0% | 4.41 ms | 0.86 ms | 18.6 / 12.9 MB |
+| **Calibrated LinearSVC, `ensemble=False`** | **0.805** | **0.828** | **0.833** | 98.3% | 1.77 ms | 0.62 ms | 5.6 / 4.8 MB |
+
+### Decision
+
+Serve `CalibratedClassifierCV(LinearSVC(), cv=5, ensemble=False)` (Platt/sigmoid calibration on out-of-fold scores, then one SVM refit on all training data):
+
+- It has the best quality, in CV and on test. Its test result is accuracy 0.829 and macro-F1 0.828, with macro precision 0.830 and macro recall 0.827.
+- The calibration wrapper converts to ONNX, so the Linear SVM chosen here is now the model that actually ships.
+- It returns class probabilities, which closes the first open point.
+- `ensemble=False` keeps a single SVM. The model is as small as the LogisticRegression, while the default `ensemble=True` is 3× larger and slower with no quality gain.
+
+Its sklearn latency (1.8 ms) is higher than the LogisticRegression's, because calibration adds a step in Python. That cost disappears in ONNX (0.6 ms), which is the optimized serving path.
+
+The Airflow quality gate was raised from 0.70 to **0.78** macro-F1, about 5 points below the served model. A regression to the old LogisticRegression (0.744) would now be rejected.

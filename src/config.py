@@ -61,7 +61,9 @@ CANDIDATE_MODEL_DIR: Final[Path] = MODELS_DIR / "candidate"
 CANDIDATE_MODEL_PATH: Final[Path] = CANDIDATE_MODEL_DIR / "model.joblib"
 CANDIDATE_ONNX_PATH: Final[Path] = CANDIDATE_MODEL_DIR / "model.onnx"
 
-MIN_F1_MACRO: Final[float] = 0.70  # current LogisticRegression baseline: 0.744 on the clean test
-# ONNX vs scikit-learn label agreement on the test set; 0.985 observed, the misses are near-ties
+# Calibrated Linear SVM scores 0.828 on the clean test (CV 0.805); the floor sits ~5 points
+# below, so it rejects real regressions — e.g. the earlier LogisticRegression (0.744)
+MIN_F1_MACRO: Final[float] = 0.78
+# ONNX vs scikit-learn label agreement on the test set; 0.983 observed, the misses are near-ties
 # (float32 TF-IDF) and ONNX macro-F1 is on par, so this only catches a broken conversion
 MIN_ONNX_AGREEMENT: Final[float] = 0.97

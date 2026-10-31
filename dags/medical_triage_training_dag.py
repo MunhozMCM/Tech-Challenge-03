@@ -25,7 +25,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 @dag(
     dag_id="medical_triage_training",
-    description="Ingest Medical Abstracts → train TF-IDF + LogisticRegression → gate → ONNX",
+    description="Ingest Medical Abstracts → train TF-IDF + calibrated SVM → gate → ONNX",
     schedule="@weekly",
     start_date=datetime(2026, 10, 1),
     catchup=False,

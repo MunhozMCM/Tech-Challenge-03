@@ -29,7 +29,7 @@ def test_health_reports_both_models_loaded(client):
 
 @pytest.mark.parametrize(
     ("route", "backend"),
-    [("/predict", "sklearn-logistic-regression"), ("/predict/onnx", "onnxruntime")],
+    [("/predict", "scikit-learn"), ("/predict/onnx", "onnxruntime")],
 )
 def test_predict_returns_condition_and_urgency(client, route, backend):
     response = client.post(route, json={TEXT_COLUMN: CARDIAC_REPORT})
