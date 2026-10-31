@@ -1,0 +1,61 @@
+name: CI
+
+# lint → test → build: every push and pull request is checked; the build job retrains the
+# model with the Airflow DAG and ships those artifacts in the inference image it smoke-tests.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_FROZEN: "1" # install exactly what uv.lock pins; fail if pyproject.toml and the lock diverge
+
+jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+      - name: Install dev tools
+        run: uv sync --only-group dev
+      - name: Lint
+        run: uv run --no-sync ruff check .
+      - name: Format
+        run: uv run --no-sync ruff format --check .
+
+  test:
+    name: Tests (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+      - name: Install project, dev tools and Airflow
+        run: uv sync --group airflow
+      - name: Unit, API and DAG tests
+        run: uv run --no-sync pytest
+
+  build:
+    name: Train (Airflow DAG) → build image → smoke test
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+      - name: Install project and Airflow
+        run: uv sync --group airflow
+      - name: Train the model with the Airflow DAG
+        run: ./scripts/airflow.sh dags test medical_triage_training
+      - name: Build the inference image
+        run: docker build -t tc3-api:${{ github.sha }} .
+      - name: Start the API container
+        run: docker run -d --name tc3-api -p 8000:8000 tc3-api:${{ github.sha }}
+      - name: Smoke test the running API
+        run: uv run --no-sync python scripts/smoke_test.py http://localhost:8000
+      - name: Container logs
+        if: failure()
+        run: docker logs tc3-api
