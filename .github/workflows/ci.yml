@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.3.3 # publishes full versions only (no floating v10 tag)
       - name: Install dev tools
         run: uv sync --only-group dev
       - name: Lint
@@ -33,7 +33,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.3.3 # publishes full versions only (no floating v10 tag)
       - name: Install project, dev tools and Airflow
         run: uv sync --group airflow
       - name: Unit, API and DAG tests
@@ -45,7 +45,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.3.3 # publishes full versions only (no floating v10 tag)
       - name: Install project and Airflow
         run: uv sync --group airflow
       - name: Train the model with the Airflow DAG
