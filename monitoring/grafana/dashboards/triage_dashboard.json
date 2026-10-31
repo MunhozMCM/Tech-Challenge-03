@@ -10,13 +10,21 @@
       "type": "stat",
       "datasource": "Prometheus",
       "gridPos": { "h": 8, "w": 8, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "fixed", "fixedColor": "blue" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] }
+        },
+        "overrides": []
+      },
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
       "targets": [
         { "expr": "sum(api_requests_total{endpoint=~\"/predict.*\"})", "legendFormat": "Total" }
       ]
     },
     {
       "title": "Latência P95 por Rota (ms)",
-      "description": "P95 do tempo de resposta em janelas de 1 min: scikit-learn (/predict) vs ONNX Runtime (/predict/onnx).",
+      "description": "P95 do tempo de resposta em janelas de 1 min: scikit-learn (/predict) vs ONNX Runtime (/predict/onnx). Só há linha enquanto chegam requisições.",
       "type": "timeseries",
       "datasource": "Prometheus",
       "gridPos": { "h": 8, "w": 8, "x": 8, "y": 0 },
@@ -29,16 +37,34 @@
       ]
     },
     {
-      "title": "Taxa de Erros HTTP 5xx (%)",
-      "description": "Respostas 5xx sobre o total de requisições de triagem; mostra 0% quando não há erros ou tráfego.",
+      "title": "Taxa de Erros HTTP (%)",
+      "description": "Respostas 5xx (falha do servidor) e 4xx (payload inválido) sobre o total de requisições de triagem; 0% quando não há erros ou tráfego.",
       "type": "timeseries",
       "datasource": "Prometheus",
       "gridPos": { "h": 8, "w": 8, "x": 16, "y": 0 },
-      "fieldConfig": { "defaults": { "unit": "percent", "min": 0 }, "overrides": [] },
+      "fieldConfig": {
+        "defaults": { "unit": "percent", "min": 0 },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Erros 5xx" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Erros 4xx (payload inválido)" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }]
+          }
+        ]
+      },
       "targets": [
         {
+          "refId": "A",
           "expr": "100 * (sum(rate(api_requests_total{endpoint=~\"/predict.*\", http_status=~\"5..\"}[1m])) or vector(0)) / (sum(rate(api_requests_total{endpoint=~\"/predict.*\"}[1m])) > 0) or vector(0)",
           "legendFormat": "Erros 5xx"
+        },
+        {
+          "refId": "B",
+          "expr": "100 * (sum(rate(api_requests_total{endpoint=~\"/predict.*\", http_status=~\"4..\"}[1m])) or vector(0)) / (sum(rate(api_requests_total{endpoint=~\"/predict.*\"}[1m])) > 0) or vector(0)",
+          "legendFormat": "Erros 4xx (payload inválido)"
         }
       ]
     }

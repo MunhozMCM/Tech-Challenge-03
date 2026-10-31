@@ -19,7 +19,13 @@ REQUEST_COUNT = Counter(
     "api_requests_total", "Total de requisicoes", ["method", "endpoint", "http_status"]
 )
 REQUEST_LATENCY = Histogram(
-    "api_request_latency_seconds", "Tempo de resposta da API em segundos", ["method", "endpoint"]
+    "api_request_latency_seconds",
+    "Tempo de resposta da API em segundos",
+    ["method", "endpoint"],
+    # Os buckets padrão começam em 5 ms, e as respostas aqui levam de 1 a 4 ms: o P95 do
+    # Grafana ficaria preso em ~4,75 ms para qualquer rota. Passos de 0,5 ms até 5 ms.
+    buckets=(0.001, 0.0015, 0.002, 0.0025, 0.003, 0.0035, 0.004, 0.0045, 0.005)
+    + (0.0075, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5),
 )
 
 model_registry: dict[str, Any] = {}
