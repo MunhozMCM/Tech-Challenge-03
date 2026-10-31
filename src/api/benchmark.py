@@ -1,4 +1,10 @@
-"""Benchmark HTTP + inference latency against the running Docker container."""
+"""Benchmark scikit-learn vs ONNX latency against the running API (container or compose stack).
+
+    uv run python -m src.api.benchmark        # API_BASE_URL defaults to http://127.0.0.1:8000
+
+Requests alternate between /predict and /predict/onnx (flipping the order every abstract),
+so network or machine drift during the run hits both routes equally.
+"""
 
 import os
 import statistics
@@ -9,39 +15,45 @@ import httpx
 from src.config import TEXT_COLUMN
 from src.data.io import load_clean_splits
 
-API_URL = os.getenv("API_URL", "http://127.0.0.1:8000/predict/onnx")
+API_BASE_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:8000")
+SKLEARN_ROUTE, ONNX_ROUTE = "/predict", "/predict/onnx"
+ROUTES = (SKLEARN_ROUTE, ONNX_ROUTE)
 
 
-def run_benchmark(n_samples: int = 300) -> None:
-    """Measure p50 and p95 latency over n_samples test abstracts."""
+def percentile(values: list[float], pct: int) -> float:
+    return statistics.quantiles(values, n=100)[pct - 1]
+
+
+def run_benchmark(n_samples: int = 1000) -> None:
+    """Measure p50/p95 model and end-to-end latency of both routes over n_samples abstracts."""
     _, test_df = load_clean_splits()
     samples = test_df[TEXT_COLUMN].iloc[:n_samples].tolist()
 
-    http_latencies: list[float] = []
-    model_latencies: list[float] = []
+    model_ms: dict[str, list[float]] = {route: [] for route in ROUTES}
+    http_ms: dict[str, list[float]] = {route: [] for route in ROUTES}
 
-    with httpx.Client(timeout=10.0) as client:
-        # Warm-up
-        client.post(API_URL, json={"medical_abstract": samples[0]})
+    with httpx.Client(base_url=API_BASE_URL, timeout=10.0) as client:
+        for text in samples[:20]:  # warm-up
+            for route in ROUTES:
+                client.post(route, json={TEXT_COLUMN: text}).raise_for_status()
 
-        for text in samples:
-            start = time.perf_counter()
-            response = client.post(API_URL, json={"medical_abstract": text})
-            total_ms = (time.perf_counter() - start) * 1000.0
-            response.raise_for_status()
+        for i, text in enumerate(samples):
+            for route in ROUTES if i % 2 == 0 else ROUTES[::-1]:
+                start = time.perf_counter()
+                response = client.post(route, json={TEXT_COLUMN: text})
+                http_ms[route].append((time.perf_counter() - start) * 1000.0)
+                response.raise_for_status()
+                model_ms[route].append(float(response.json()["latency_ms"]))
 
-            data = response.json()
-            http_latencies.append(total_ms)
-            model_latencies.append(float(data["latency_ms"]))
+    print(f"=== Benchmark ({len(samples)} requisições por rota, intercaladas) ===")
+    print(f"{'Rota':<15}{'Modelo p50':>12}{'Modelo p95':>12}{'HTTP p50':>12}{'HTTP p95':>12}  (ms)")
+    for route in ROUTES:
+        cells = [percentile(series[route], p) for series in (model_ms, http_ms) for p in (50, 95)]
+        print(f"{route:<15}" + "".join(f"{cell:>12.3f}" for cell in cells))
 
-    p50_model = statistics.median(model_latencies)
-    p95_model = statistics.quantiles(model_latencies, n=20)[18]
-    p50_http = statistics.median(http_latencies)
-    p95_http = statistics.quantiles(http_latencies, n=20)[18]
-
-    print(f"=== Benchmark ({n_samples} requisições sequenciais) ===")
-    print(f"In-process (Model) | p50: {p50_model:.3f} ms | p95: {p95_model:.3f} ms")
-    print(f"End-to-End (HTTP)  | p50: {p50_http:.3f} ms | p95: {p95_http:.3f} ms")
+    for label, series in (("modelo", model_ms), ("HTTP", http_ms)):
+        gain = 1 - statistics.median(series[ONNX_ROUTE]) / statistics.median(series[SKLEARN_ROUTE])
+        print(f"ONNX vs scikit-learn ({label}, p50): {gain:.0%} mais rápido")
 
 
 if __name__ == "__main__":

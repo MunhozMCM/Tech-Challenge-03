@@ -1,32 +1,45 @@
 {
+  "uid": "triage-api",
   "title": "API de Triagem Médica",
   "refresh": "5s",
+  "time": { "from": "now-15m", "to": "now" },
   "panels": [
     {
-      "title": "Total de Requisições",
+      "title": "Total de Requisições de Triagem",
+      "description": "Chamadas a /predict e /predict/onnx (exclui os scrapes do Prometheus em /metrics e o /health).",
       "type": "stat",
       "datasource": "Prometheus",
       "gridPos": { "h": 8, "w": 8, "x": 0, "y": 0 },
       "targets": [
-        { "expr": "sum(api_requests_total)", "legendFormat": "Total" }
+        { "expr": "sum(api_requests_total{endpoint=~\"/predict.*\"})", "legendFormat": "Total" }
       ]
     },
     {
-      "title": "Latência P95 (ms)",
+      "title": "Latência P95 por Rota (ms)",
+      "description": "P95 do tempo de resposta em janelas de 1 min: scikit-learn (/predict) vs ONNX Runtime (/predict/onnx).",
       "type": "timeseries",
       "datasource": "Prometheus",
       "gridPos": { "h": 8, "w": 8, "x": 8, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "ms" }, "overrides": [] },
       "targets": [
-        { "expr": "histogram_quantile(0.95, sum(rate(api_request_latency_seconds_bucket[1m])) by (le)) * 1000", "legendFormat": "P95 Latency (ms)" }
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, endpoint) (rate(api_request_latency_seconds_bucket{endpoint=~\"/predict.*\"}[1m]))) * 1000",
+          "legendFormat": "{{endpoint}}"
+        }
       ]
     },
     {
       "title": "Taxa de Erros HTTP 5xx (%)",
+      "description": "Respostas 5xx sobre o total de requisições de triagem; mostra 0% quando não há erros ou tráfego.",
       "type": "timeseries",
       "datasource": "Prometheus",
       "gridPos": { "h": 8, "w": 8, "x": 16, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "percent", "min": 0 }, "overrides": [] },
       "targets": [
-        { "expr": "sum(rate(api_requests_total{http_status=~\"5..\"}[1m])) / sum(rate(api_requests_total[1m])) * 100", "legendFormat": "Error Rate %" }
+        {
+          "expr": "100 * (sum(rate(api_requests_total{endpoint=~\"/predict.*\", http_status=~\"5..\"}[1m])) or vector(0)) / (sum(rate(api_requests_total{endpoint=~\"/predict.*\"}[1m])) > 0) or vector(0)",
+          "legendFormat": "Erros 5xx"
+        }
       ]
     }
   ],
