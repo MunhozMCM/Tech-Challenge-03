@@ -22,15 +22,15 @@ A single-label classifier cannot fit identical inputs with different targets, an
 
 ### Evidence
 
-The best pipeline (TF-IDF + Linear SVM) trained on the raw official train split:
+The best pipeline trained on the raw official train split, evaluated on both test versions. The notebook's cleaning-impact cell now shows the production model (calibrated Linear SVM, Decision 5); the bare Linear SVM column comes from the first notebook run.
 
-| Train → Test | Accuracy | F1 (macro) |
+| Train → Test | Linear SVM: accuracy / F1 macro | Calibrated Linear SVM (production): accuracy / F1 macro |
 |---|---|---|
-| raw → raw | 0.505 | 0.501 |
-| raw → clean | 0.811 | 0.809 |
-| clean → clean | **0.818** | **0.815** |
+| raw → raw | 0.505 / 0.501 | 0.493 / 0.479 |
+| raw → clean | 0.811 / 0.809 | 0.788 / 0.772 |
+| clean → clean | **0.818 / 0.815** | **0.829 / 0.828** |
 
-Training on the raw rows barely hurts (0.809 vs 0.815). The raw test split is the problem: it cuts the measured accuracy from ~0.81 to ~0.50 because of label conflicts, not because the model is weak.
+The raw test split cuts the measured accuracy to ~0.50 for both models, because of label conflicts and not because the models are weak. Training on the raw rows barely hurts the bare SVM (0.809 vs 0.815), but it costs the calibrated model 5.6 points of macro-F1 (0.772 vs 0.828). Cleaning matters for evaluation and for training alike.
 
 ### Decision
 
@@ -59,25 +59,28 @@ All candidates use the same vectorizer: lowercase, English stop words, unigrams 
 
 | Model | CV F1 macro | Test F1 macro | Test accuracy | Latency p50 / p95 (ms) | Size (MB) |
 |---|---|---|---|---|---|
-| **Linear SVM** | **0.798 ± 0.008** | **0.815** | **0.818** | 0.60 / 0.81 | 5.6 |
-| Logistic Regression | 0.725 ± 0.004 | 0.744 | 0.769 | 0.62 / 0.91 | 5.6 |
-| Random Forest (300 trees) | 0.699 ± 0.004 | 0.705 | 0.740 | 20.3 / 25.9 | 125.8 |
-| Multinomial NB | 0.473 ± 0.004 | 0.464 | 0.661 | 1.04 / 1.38 | 8.8 |
-| Dummy (most frequent) | 0.090 | 0.088 | 0.280 | 0.48 / 0.70 | 2.3 |
+| Calibrated Linear SVM (production, Decision 5) | 0.805 ± 0.008 | 0.828 | 0.829 | 1.43 / 2.20 | 5.6 |
+| **Linear SVM** | **0.798 ± 0.008** | **0.815** | **0.818** | 0.95 / 1.56 | 5.6 |
+| Logistic Regression | 0.725 ± 0.004 | 0.744 | 0.769 | 0.62 / 0.81 | 5.6 |
+| Random Forest (300 trees) | 0.699 ± 0.004 | 0.705 | 0.740 | 22.8 / 33.0 | 125.8 |
+| Multinomial NB | 0.473 ± 0.004 | 0.464 | 0.661 | 1.06 / 1.21 | 8.8 |
+| Dummy (most frequent) | 0.090 | 0.088 | 0.280 | 0.52 / 0.73 | 2.3 |
 
-Latency is the wall time of `predict([one_abstract])` over 300 test abstracts, single-threaded. That is how the API will serve requests. It was measured in-process, without HTTP or Docker overhead.
+Latency is the wall time of `predict([one_abstract])` over 300 test abstracts, single-threaded. That is how the API will serve requests. It was measured in-process, without HTTP or Docker overhead. The values come from the latest notebook run. Latencies shift by tens of percent between runs on the same machine (the bare Linear SVM measured 0.60 ms in the first run), so compare models within one run. Quality metrics are deterministic.
 
 - **Linear SVM** has the best quality and is among the cheapest models. Its CV and test scores agree (0.798 vs 0.815), so the choice is not a lucky test split.
-- **Random Forest**, the challenge's example (TF-IDF + RF), is worse on every axis: −0.11 macro-F1, ~34× slower and ~23× larger. Hundreds of deep trees over 81k sparse features are the wrong tool here.
+- **Random Forest**, the challenge's example (TF-IDF + RF), is worse on every axis: −0.11 macro-F1, ~24× slower and ~23× larger than the Linear SVM. Hundreds of deep trees over 81k sparse features are the wrong tool here.
 - **Logistic Regression and Multinomial NB** run on library defaults (`C=1.0`, `alpha=1.0`). Both look under-tuned, so their scores are lower bounds, not verdicts.
 
-Weakest spots of the Linear SVM: *nervous system diseases* (recall 0.71, with 21% of its abstracts predicted as *general pathological*) and the catch-all *general pathological conditions* (F1 0.74). That is expected for a residual class whose vocabulary ("acute", "chronic", "postoperative") overlaps the others.
+Weakest spots of the production model (the notebook's per-class report and confusion matrix): *nervous system diseases* (recall 0.756, with 16% of its abstracts predicted as *general pathological*) and the catch-all *general pathological conditions* (F1 0.751). The bare Linear SVM showed the same pattern (recall 0.71, 21%; F1 0.74). That is expected for a residual class whose vocabulary ("acute", "chronic", "postoperative", all among its top SVM weights) overlaps the others.
 
 ### Open points for the next iterations
 
-- `LinearSVC` has no `predict_proba`. If the API must return a confidence score, wrap it in `CalibratedClassifierCV` or tune `C` for Logistic Regression and compare again.
-- Hyperparameter search (`C`, `alpha`, vectorizer settings) under the same CV protocol.
-- Etapa 4: confirm the chosen pipeline converts with `skl2onnx` (TF-IDF with bigrams and `sublinear_tf`). Then measure ONNX Runtime against sklearn with this same single-request protocol. The sklearn baseline is already sub-millisecond, so the comparison should also report p95 and the latency measured through the API.
+- ~~`LinearSVC` has no `predict_proba`. If the API must return a confidence score, wrap it in `CalibratedClassifierCV` or tune `C` for Logistic Regression and compare again.~~ **Resolved (Decision 5):** the calibrated SVM is in production.
+- Hyperparameter search (`C`, `alpha`, vectorizer settings) under the same CV protocol. **Still open.**
+- ~~Etapa 4: confirm the chosen pipeline converts with `skl2onnx` (TF-IDF with bigrams and `sublinear_tf`), then measure ONNX Runtime against sklearn.~~ **Resolved:**
+  - The bare LinearSVC does not convert; the calibrated one does, with 98.3% agreement (the notebook's ONNX cell).
+  - The latency comparison through the API is in the README (Etapa 4).
 
 ---
 
@@ -108,3 +111,24 @@ Serve `CalibratedClassifierCV(LinearSVC(), cv=5, ensemble=False)` (Platt/sigmoid
 Its sklearn latency (1.8 ms) is higher than the LogisticRegression's, because calibration adds a step in Python. That cost disappears in ONNX (0.6 ms), which is the optimized serving path.
 
 The Airflow quality gate was raised from 0.70 to **0.78** macro-F1, about 5 points below the served model. A regression to the old LogisticRegression (0.744) would now be rejected.
+
+### In the notebook
+
+`NLP_experiments.ipynb` now includes this model in the candidate comparison and adds two cells.
+
+The **ONNX check** confirms that the bare LinearSVC fails to convert, while the calibrated SVM and the Logistic Regression convert:
+
+| Model | Agreement with scikit-learn | ONNX macro-F1 |
+|---|---|---|
+| Calibrated SVM | 98.3% | 0.833 |
+| Logistic Regression | 98.5% | 0.752 |
+
+The **triage view** maps conditions to urgency through `src.config.URGENCY_MAPPING`. The production model triages 88.1% of test abstracts correctly:
+
+| Urgency level | Recall |
+|---|---|
+| urgente | 85.8% (543 / 633) |
+| atenção | 90.1% |
+| normal | 85.1% |
+
+The costliest error, an urgent abstract triaged as *normal*, happens in 5 of 633 urgent cases (0.8%).
