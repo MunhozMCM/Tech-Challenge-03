@@ -42,5 +42,7 @@ mlartifacts/
 # WSL/Windows alternate-data-stream cruft
 *:Zone.Identifier
 
-# Personal folders
+# Personal folders & scripts
 /material-fiap
+/PDFS/
+ROTEIRO_GRAVACAO_STAR.md

@@ -121,11 +121,18 @@ Alternativa sem Airflow: `uv run python -m src.models.train && uv run python -m 
 ```bash
 docker compose up -d --build
 ```
-| Serviço | Endereço |
-|---|---|
-| API (Swagger) | http://localhost:8000/docs |
-| Prometheus | http://localhost:9090 |
-| Grafana | http://localhost:3000/d/triage-api (usuário `admin`, senha `admin`) |
+
+#### 🌐 Endereçamento e Portas dos Serviços
+
+Os serviços podem ser validados tanto **localmente via Docker Compose** quanto pelos **links públicos ao vivo** (expostos via túnel seguro Cloudflare com HTTPS):
+
+| Serviço | Porta Local | Endereço Local (Docker) | Endereço Público Online | Descrição & Observações |
+|---|:---:|---|---|---|
+| **API REST (FastAPI / Swagger)** | `8000` | [http://localhost:8000](http://localhost:8000) | [https://api.lucasmunhoz.dev.br](https://api.lucasmunhoz.dev.br) | Documentação interativa Swagger (redireciona automaticamente da raiz `/` para `/docs`). |
+| **Health Check da API** | `8000` | [http://localhost:8000/health](http://localhost:8000/health) | [https://api.lucasmunhoz.dev.br/health](https://api.lucasmunhoz.dev.br/health) | Retorna status de prontidão e confirma que os modelos scikit-learn e ONNX estão carregados. |
+| **Grafana (Dashboard de Triagem)** | `3000` | [http://localhost:3000/d/triage-api](http://localhost:3000/d/triage-api) | [https://grafana.lucasmunhoz.dev.br/d/triage-api](https://grafana.lucasmunhoz.dev.br/d/triage-api) | Dashboard com os 3 painéis provisionados. Acesso anônimo ativo (abre sem exigir senha; login opcional `admin`/`admin`). |
+| **Prometheus (Métricas brutas)** | `9090` | [http://localhost:9090](http://localhost:9090) | *Rede interna Docker* | Coleta métricas da rota `/metrics` da API a cada 5 segundos. |
+| **Airflow UI (Orquestração de Retreino)** | `8080` | [http://localhost:8080](http://localhost:8080) | *Execução local sob demanda* | Iniciar com `./scripts/airflow.sh standalone` (credenciais em `.airflow/simple_auth_manager_passwords.json.generated`). |
 
 ### 4. Validar a API e gerar tráfego (Etapas 1, 3 e 4)
 ```bash

@@ -9,7 +9,7 @@ import joblib
 import numpy as np
 import onnxruntime as ort
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import Response
+from fastapi.responses import RedirectResponse, Response
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 
 from src.api.schemas import TriageRequest, TriageResponse
@@ -72,6 +72,11 @@ async def metrics_middleware(request: Request, call_next):
         latency = time.perf_counter() - start_time
         REQUEST_COUNT.labels(method=method, endpoint=endpoint, http_status=str(status_code)).inc()
         REQUEST_LATENCY.labels(method=method, endpoint=endpoint).observe(latency)
+
+
+@app.get("/", include_in_schema=False)
+def root():
+    return RedirectResponse(url="/docs")
 
 
 @app.get("/metrics")
